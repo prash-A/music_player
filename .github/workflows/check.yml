@@ -1,0 +1,25 @@
+name: Use Custom Action with Parameters
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**/*"
+
+jobs:
+  use_custom_action:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Use Custom Action with Parameters
+        id: custom_action
+        uses: ./.github/workflows/validate-cdk-stack # Path to your custom action within the repository
+        with:
+          cdk_stack_folder: "music-app/lib"
+          pr_number: "${{ github.event.number }}"
+
+      - name: Display Action Outputs
+        run: |
+          echo "Output Message: ${{ steps.custom_action.outputs.message }}"
+          echo "Output Result: ${{ steps.custom_action.outputs.result }}"
