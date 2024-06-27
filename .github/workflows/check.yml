@@ -13,6 +13,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+      - name: Display PR Number
+        run: |
+          echo "${{ github.event.number }}"
+        shell: bash
 
       - name: Use Custom Action with Parameters
         id: custom_action
