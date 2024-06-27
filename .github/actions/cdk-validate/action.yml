@@ -12,8 +12,8 @@ inputs:
 runs:
     using: "composite"
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      # - name: Checkout Repository
+      #   uses: actions/checkout@v4
 
       - name: Set PR Number
         run: echo "PR_NUMBER=${{ inputs.pr_number.value }}" >> "$GITHUB_ENV"
