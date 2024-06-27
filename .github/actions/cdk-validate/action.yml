@@ -18,6 +18,10 @@ runs:
       - name: Set PR Number
         run: echo "PR_NUMBER=${{ inputs.pr_number }}" >> "$GITHUB_ENV"
         shell: bash
+      - name: Display PR Number
+        run: |
+          echo "${{ inputs.pr_number }}"
+        shell: bash
 
       - name: List changed files & Scan for CSDK stack files files
         id: list_files
