@@ -17,6 +17,7 @@ runs:
 
       - name: Set PR Number
         run: echo "PR_NUMBER=${{ inputs.pr_number.value }}" >> "$GITHUB_ENV"
+        shell: bash
 
       - name: List changed files & Scan for CSDK stack files files
         id: list_files
@@ -25,6 +26,7 @@ runs:
           grep -E '^${{ inputs.cdk_stack_folder.value }}/.*\.ts$' changed_files.txt > filtered_files.txt
           files=$(cat filtered_files.txt | tr '\n' ' ')
           echo "STACK_FILES=[$files]" >> $GITHUB_ENV
+        shell: bash
 
       - name: Setup Node.js
         uses: actions/setup-node@v2
@@ -36,6 +38,7 @@ runs:
           npm install -g aws-cdk
           npm install
           npm install cdk-nag
+        shell: bash
 
       - name: Create bin file with stack path placeholder
         run: |
@@ -53,6 +56,7 @@ runs:
           Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }))
           new <STACK_CLASS>(app, 'CdkTestStack', {});
           EOF
+        shell: bash
 
       - name: Update template and synthesize stacks
         id: synth_stacks
@@ -74,6 +78,7 @@ runs:
             fi
           done
           echo "::set-output name=synth_output::$output"
+        shell: bash
 
       - name: Analyze Nag Reports
         run: |
@@ -130,6 +135,7 @@ runs:
 
           # Output ratings file as an artifact or set as an output variable for further steps
           echo "::set-output name=file_ratings::ratings.txt"
+        shell: bash
 
       - name: Scan Resultant
         id: scanner
@@ -141,6 +147,7 @@ runs:
             echo "🤖 🤖Sustainability Score is less than 1 🤖 🤖"
           fi
         continue-on-error: true
+        shell: bash
 
       - name: Update AWS Sustainability Scan Report on PR
         uses: actions/github-script@v7
@@ -211,3 +218,4 @@ runs:
           else
             echo "🤖 🤖Sustainability Score is less than 1 🤖 🤖"
           fi
+        shell: bash
