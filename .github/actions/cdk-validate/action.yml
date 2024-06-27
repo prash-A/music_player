@@ -8,29 +8,21 @@ inputs:
     description: "PR number that triggered the action"
     required: true
 
-env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-jobs:
-  sustainability_check:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-      pull-requests: write
-
+runs:
+    using: "composite"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set PR Number
-        run: echo "PR_NUMBER=${{ inputs.pr_number }}" >> "$GITHUB_ENV"
+        run: echo "PR_NUMBER=${{ inputs.pr_number.value }}" >> "$GITHUB_ENV"
 
       - name: List changed files & Scan for CSDK stack files files
         id: list_files
         run: |
           gh pr view $PR_NUMBER --json files --jq '.files[].path' > changed_files.txt
-          grep -E '^${{ inputs.cdk_stack_folder }}/.*\.ts$' changed_files.txt > filtered_files.txt
+          grep -E '^${{ inputs.cdk_stack_folder.value }}/.*\.ts$' changed_files.txt > filtered_files.txt
           files=$(cat filtered_files.txt | tr '\n' ' ')
           echo "STACK_FILES=[$files]" >> $GITHUB_ENV
 
