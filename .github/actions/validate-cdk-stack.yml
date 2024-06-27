@@ -11,211 +11,205 @@ inputs:
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-jobs:
-  sustainability_check:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-      pull-requests: write
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    - name: Set PR Number
+      run: echo "PR_NUMBER=${{ inputs.pr_number }}" >> "$GITHUB_ENV"
 
-      - name: Set PR Number
-        run: echo "PR_NUMBER=${{ inputs.pr_number }}" >> "$GITHUB_ENV"
+    - name: List changed files & Scan for CSDK stack files files
+      id: list_files
+      run: |
+        gh pr view $PR_NUMBER --json files --jq '.files[].path' > changed_files.txt
+        grep -E '^${{ inputs.cdk_stack_folder }}/.*\.ts$' changed_files.txt > filtered_files.txt
+        files=$(cat filtered_files.txt | tr '\n' ' ')
+        echo "STACK_FILES=[$files]" >> $GITHUB_ENV
 
-      - name: List changed files & Scan for CSDK stack files files
-        id: list_files
-        run: |
-          gh pr view $PR_NUMBER --json files --jq '.files[].path' > changed_files.txt
-          grep -E '^${{ inputs.cdk_stack_folder }}/.*\.ts$' changed_files.txt > filtered_files.txt
-          files=$(cat filtered_files.txt | tr '\n' ' ')
-          echo "STACK_FILES=[$files]" >> $GITHUB_ENV
+    - name: Setup Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: "14"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v2
-        with:
-          node-version: "14"
+    - name: Install CDK and dependencies
+      run: |
+        npm install -g aws-cdk
+        npm install
+        npm install cdk-nag
 
-      - name: Install CDK and dependencies
-        run: |
-          npm install -g aws-cdk
-          npm install
-          npm install cdk-nag
+    - name: Create bin file with stack path placeholder
+      run: |
+        mkdir -p bin
+        cat <<EOF > bin/app_template.js
+        #!/usr/bin/env node
+        import 'source-map-support/register';
+        import * as cdk from 'aws-cdk-lib';
+        import { <STACK_CLASS> } from '<STACK_IMPORT_PATH>';
+        import { AwsSolutionsChecks } from 'cdk-nag'
+        import { Aspects } from 'aws-cdk-lib';
 
-      - name: Create bin file with stack path placeholder
-        run: |
-          mkdir -p bin
-          cat <<EOF > bin/app_template.js
-          #!/usr/bin/env node
-          import 'source-map-support/register';
-          import * as cdk from 'aws-cdk-lib';
-          import { <STACK_CLASS> } from '<STACK_IMPORT_PATH>';
-          import { AwsSolutionsChecks } from 'cdk-nag'
-          import { Aspects } from 'aws-cdk-lib';
+        const app = new cdk.App();
+        // Add the cdk-nag AwsSolutions Pack with extra verbose logging enabled.
+        Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }))
+        new <STACK_CLASS>(app, 'CdkTestStack', {});
+        EOF
 
-          const app = new cdk.App();
-          // Add the cdk-nag AwsSolutions Pack with extra verbose logging enabled.
-          Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }))
-          new <STACK_CLASS>(app, 'CdkTestStack', {});
-          EOF
+    - name: Update template and synthesize stacks
+      id: synth_stacks
+      run: |
+        output=""
+        for file in $(echo $STACK_FILES | tr -d '[],' | tr ' ' '\n'); do
+          sed "s|<STACK_IMPORT_PATH>|$file|g" bin/app_template.js > bin/app_template_$file.js
+          class=$(grep -oP 'export class \K\w+' $file)
+          sed -i "s|<STACK_CLASS>|$class|g" bin/app_template_$file.js
+          npx cdk synth -a "node bin/app_template_$file.js"
+          output+=$(cat synth_output.txt)
 
-      - name: Update template and synthesize stacks
-        id: synth_stacks
-        run: |
-          output=""
-          for file in $(echo $STACK_FILES | tr -d '[],' | tr ' ' '\n'); do
-            sed "s|<STACK_IMPORT_PATH>|$file|g" bin/app_template.js > bin/app_template_$file.js
-            class=$(grep -oP 'export class \K\w+' $file)
-            sed -i "s|<STACK_CLASS>|$class|g" bin/app_template_$file.js
-            npx cdk synth -a "node bin/app_template_$file.js"
-            output+=$(cat synth_output.txt)
-
-            report_path="cdk.out/AwsSolutions-$class-NagReport.csv"
-            if [ -f "$report_path" ]; then
-              echo "Nag report found at $report_path"
-              cat "$report_path"
-            else
-              echo "Nag report not found"
-            fi
-          done
-          echo "::set-output name=synth_output::$output"
-
-      - name: Analyze Nag Reports
-        run: |
-          # Get list of report files
-          reports=$(find cdk.out -name "AwsSolutions-*.csv")
-
-          # Initialize counters
-          total_errors=0
-          total_warnings=0
-
-          # Loop through each report file
-          for file in $(echo $STACK_FILES | tr -d '[],' | tr ' ' '\n'); do
-            class=$(grep -oP 'export class \K\w+' $file)
-            report="cdk.out/AwsSolutions-$class-NagReport.csv"
-            # Count errors and warnings
-            errors=$(awk -F ',' '$5 == "Error" { count++ } END { print count }' "$report")
-            warnings=$(awk -F ',' '$5 == "Warning" { count++ } END { print count }' "$report")
-
-            echo "Report: $report"
-            echo "Errors: $errors"
-            echo "Warnings: $warnings"
-            echo "---"
-
-            # Determine rating based on counts
-            if [ "$errors" -gt 0 ]; then
-              rating=2
-              echo "SUS_SCORE=$rating" >> $GITHUB_ENV
-            elif [ "$warnings" -gt 0 ]; then
-              rating=1
-            else
-              rating=0
-            fi
-            
-            # Assign rating to file in the map
-            file_ratings["file"]=$file
-            file_ratings["rating"]=$rating
-            file_ratings["csv"]="cdk.out/AwsSolutions-$class-NagReport.csv"
-          done
-            
-          # Print ratings map for debugging
-          declare -p file_ratings
-
-          # Write ratings to a file
-          echo "# File -> Rating" > ratings.txt
-          for file in "${!file_ratings[@]}"; do
-            echo "$file -> ${file_ratings[$file]}================================================================" >> ratings.txt
-            echo "csv file output-->"
-            class=$(grep -oP 'export class \K\w+' $file)
-            cat cdk.out/AwsSolutions-$class-NagReport.csv >> ratings.tx
-            echo "==========================================================================================" >> ratings.txt
-          done
-
-          echo "DETAILS=$(cat ratings.txt)" >> $GITHUB_ENV
-
-          # Output ratings file as an artifact or set as an output variable for further steps
-          echo "::set-output name=file_ratings::ratings.txt"
-
-      - name: Scan Resultant
-        id: scanner
-        run: |
-          if [ ${{ env.SUS_SCORE }} -gt 1 ]; then
-          echo "❌ ❌ Sustainability Score is greater than 1, Please check the Failed Rules ❌ ❌"
-          exit 1
+          report_path="cdk.out/AwsSolutions-$class-NagReport.csv"
+          if [ -f "$report_path" ]; then
+            echo "Nag report found at $report_path"
+            cat "$report_path"
           else
-            echo "🤖 🤖Sustainability Score is less than 1 🤖 🤖"
+            echo "Nag report not found"
           fi
-        continue-on-error: true
+        done
+        echo "::set-output name=synth_output::$output"
 
-      - name: Update AWS Sustainability Scan Report on PR
-        uses: actions/github-script@v7
-        if: ${{ github.event_name == 'pull_request' }}
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            // 1. Retrieve existing bot comments for the PR
-            const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-            })
-            const botComment = comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes('Sustainability Scanner Report')
-            })
+    - name: Analyze Nag Reports
+      run: |
+        # Get list of report files
+        reports=$(find cdk.out -name "AwsSolutions-*.csv")
 
-            // 2. Prepare format of the comment
+        # Initialize counters
+        total_errors=0
+        total_warnings=0
 
-            const output = `#### Sustainability Scan 📖 : \` ${{ steps.scanner.outcome }} \`
+        # Loop through each report file
+        for file in $(echo $STACK_FILES | tr -d '[],' | tr ' ' '\n'); do
+          class=$(grep -oP 'export class \K\w+' $file)
+          report="cdk.out/AwsSolutions-$class-NagReport.csv"
+          # Count errors and warnings
+          errors=$(awk -F ',' '$5 == "Error" { count++ } END { print count }' "$report")
+          warnings=$(awk -F ',' '$5 == "Warning" { count++ } END { print count }' "$report")
 
-            <details>
+          echo "Report: $report"
+          echo "Errors: $errors"
+          echo "Warnings: $warnings"
+          echo "---"
 
-            <summary> Scan Report </summary>
-
-            \`\`\`\n
-
-            Sustainability Score: ${{ env.SUS_SCORE }}
-
-            Scanned CDK stacks and ratings: ${{ env.DETAILS}}
-
-            \`\`\`
-
-            </details>
-
-            *Developer : @${{ github.actor }}, 
-            Action : \`${{ github.event_name }}\`,
-            PR Number : \`${{ github.event.number }}\`,  
-            Workflow : \`${{ github.workflow }}\`*`;
-
-            // 3. If we have a comment, update it, otherwise create a new one
-            if (botComment) 
-            {
-              github.rest.issues.updateComment
-              ({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: output
-              })
-            } 
-            else 
-            {
-              github.rest.issues.createComment
-              ({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: output
-              })
-            }
-
-      - name: Final Resultant
-        run: |
-          if [ ${{ env.SUS_SCORE }} -gt 1 ]; then
-          echo "❌ ❌ Sustainability Score is greater than 1, Please check the Failed Rules ❌ ❌"
-          exit 1
+          # Determine rating based on counts
+          if [ "$errors" -gt 0 ]; then
+            rating=2
+            echo "SUS_SCORE=$rating" >> $GITHUB_ENV
+          elif [ "$warnings" -gt 0 ]; then
+            rating=1
           else
-            echo "🤖 🤖Sustainability Score is less than 1 🤖 🤖"
+            rating=0
           fi
+          
+          # Assign rating to file in the map
+          file_ratings["file"]=$file
+          file_ratings["rating"]=$rating
+          file_ratings["csv"]="cdk.out/AwsSolutions-$class-NagReport.csv"
+        done
+          
+        # Print ratings map for debugging
+        declare -p file_ratings
+
+        # Write ratings to a file
+        echo "# File -> Rating" > ratings.txt
+        for file in "${!file_ratings[@]}"; do
+          echo "$file -> ${file_ratings[$file]}================================================================" >> ratings.txt
+          echo "csv file output-->"
+          class=$(grep -oP 'export class \K\w+' $file)
+          cat cdk.out/AwsSolutions-$class-NagReport.csv >> ratings.tx
+          echo "==========================================================================================" >> ratings.txt
+        done
+
+        echo "DETAILS=$(cat ratings.txt)" >> $GITHUB_ENV
+
+        # Output ratings file as an artifact or set as an output variable for further steps
+        echo "::set-output name=file_ratings::ratings.txt"
+
+    - name: Scan Resultant
+      id: scanner
+      run: |
+        if [ ${{ env.SUS_SCORE }} -gt 1 ]; then
+        echo "❌ ❌ Sustainability Score is greater than 1, Please check the Failed Rules ❌ ❌"
+        exit 1
+        else
+          echo "🤖 🤖Sustainability Score is less than 1 🤖 🤖"
+        fi
+      continue-on-error: true
+
+    - name: Update AWS Sustainability Scan Report on PR
+      uses: actions/github-script@v7
+      if: ${{ github.event_name == 'pull_request' }}
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          // 1. Retrieve existing bot comments for the PR
+          const { data: comments } = await github.rest.issues.listComments({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          issue_number: context.issue.number,
+          })
+          const botComment = comments.find(comment => {
+          return comment.user.type === 'Bot' && comment.body.includes('Sustainability Scanner Report')
+          })
+
+          // 2. Prepare format of the comment
+
+          const output = `#### Sustainability Scan 📖 : \` ${{ steps.scanner.outcome }} \`
+
+          <details>
+
+          <summary> Scan Report </summary>
+
+          \`\`\`\n
+
+          Sustainability Score: ${{ env.SUS_SCORE }}
+
+          Scanned CDK stacks and ratings: ${{ env.DETAILS}}
+
+          \`\`\`
+
+          </details>
+
+          *Developer : @${{ github.actor }}, 
+          Action : \`${{ github.event_name }}\`,
+          PR Number : \`${{ github.event.number }}\`,  
+          Workflow : \`${{ github.workflow }}\`*`;
+
+          // 3. If we have a comment, update it, otherwise create a new one
+          if (botComment) 
+          {
+            github.rest.issues.updateComment
+            ({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: output
+            })
+          } 
+          else 
+          {
+            github.rest.issues.createComment
+            ({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+          }
+
+    - name: Final Resultant
+      run: |
+        if [ ${{ env.SUS_SCORE }} -gt 1 ]; then
+        echo "❌ ❌ Sustainability Score is greater than 1, Please check the Failed Rules ❌ ❌"
+        exit 1
+        else
+          echo "🤖 🤖Sustainability Score is less than 1 🤖 🤖"
+        fi
