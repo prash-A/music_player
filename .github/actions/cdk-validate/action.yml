@@ -71,7 +71,7 @@ runs:
           output=""
           for file in $(echo $STACK_FILES | tr -d '[],' | tr ' ' '\n'); do
             file_name="${$(basename "$file")%.*}" 
-            sed "s|<STACK_IMPORT_PATH>|$file|g" bin/app_template.ts > bin/app_template_$file_name.ts
+            sed "s|<STACK_IMPORT_PATH>|$(dirname $file)/$file_name|g" bin/app_template.ts > bin/app_template_$file_name.ts
             class=$(grep -oP 'export class \K\w+' $file)
             sed -i "s|<STACK_CLASS>|$class|g" bin/app_template_$file_name.ts
             echo "Printing final file "
