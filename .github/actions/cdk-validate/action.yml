@@ -58,7 +58,7 @@ runs:
           const app = new cdk.App();
           // Add the cdk-nag AwsSolutions Pack with extra verbose logging enabled.
           Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }))
-          new <STACK_CLASS>(app, 'CdkTestStack', {});
+          new <STACK_CLASS>(app, '<STACK_CLASS>', {});
           EOF
 
           ls bin/
@@ -73,6 +73,8 @@ runs:
             sed "s|<STACK_IMPORT_PATH>|$file|g" bin/app_template.ts > bin/app_template_$(basename $file)
             class=$(grep -oP 'export class \K\w+' $file)
             sed -i "s|<STACK_CLASS>|$class|g" bin/app_template_$(basename $file)
+            echo "Printing final file "
+            cat bin/app_template_$(basename $file)
             npx cdk synth -a "node bin/app_template_$(basename $file)"
             output+=$(cat synth_output.txt)
 
