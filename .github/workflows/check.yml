@@ -22,7 +22,7 @@ jobs:
         id: custom_action
         uses: ./.github/actions/cdk-validate # Path to your custom action within the repository
         with:
-          cdk_stack_folder: "music-app/lib"
+          cdk_stack_folder: "lib"
           pr_number: "${{ github.event.number }}"
 
       - name: Display Action Outputs
