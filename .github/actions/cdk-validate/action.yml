@@ -49,11 +49,11 @@ runs:
           mkdir -p bin
           cat <<EOF > bin/app_template.ts
           #!/usr/bin/env node
-          import 'source-map-support/register';
-          import * as cdk from 'aws-cdk-lib';
-          import { <STACK_CLASS> } from '<STACK_IMPORT_PATH>';
+          import { <STACK_CLASS> } from '../<STACK_IMPORT_PATH>';
           import { AwsSolutionsChecks } from 'cdk-nag'
           import { Aspects } from 'aws-cdk-lib';
+          import 'source-map-support/register';
+          import * as cdk from 'aws-cdk-lib';
 
           const app = new cdk.App();
           // Add the cdk-nag AwsSolutions Pack with extra verbose logging enabled.
