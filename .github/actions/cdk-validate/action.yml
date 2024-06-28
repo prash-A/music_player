@@ -70,12 +70,13 @@ runs:
         run: |
           output=""
           for file in $(echo $STACK_FILES | tr -d '[],' | tr ' ' '\n'); do
-            sed "s|<STACK_IMPORT_PATH>|$file|g" bin/app_template.ts > bin/app_template_$(basename $file)
+            file_name="${$(basename "$file")%.*}" 
+            sed "s|<STACK_IMPORT_PATH>|$file|g" bin/app_template.ts > bin/app_template_$file_name.ts
             class=$(grep -oP 'export class \K\w+' $file)
-            sed -i "s|<STACK_CLASS>|$class|g" bin/app_template_$(basename $file)
+            sed -i "s|<STACK_CLASS>|$class|g" bin/app_template_$file_name.ts
             echo "Printing final file "
-            cat bin/app_template_$(basename $file)
-            npx cdk synth -a "node bin/app_template_$(basename $file)"
+            cat bin/app_template_$file_name.ts
+            npx cdk synth -a "node bin/app_template_$file_name.ts"
             output+=$(cat synth_output.txt)
 
             report_path="cdk.out/AwsSolutions-$class-NagReport.csv"
