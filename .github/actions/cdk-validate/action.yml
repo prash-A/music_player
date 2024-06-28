@@ -70,7 +70,7 @@ runs:
         run: |
           output=""
           for file in $(echo $STACK_FILES | tr -d '[],' | tr ' ' '\n'); do
-            sed "s|<STACK_IMPORT_PATH>|$file|g" bin/app_template.js > bin/app_template_$(basename $file)
+            sed "s|<STACK_IMPORT_PATH>|$file|g" bin/app_template.ts > bin/app_template_$(basename $file)
             class=$(grep -oP 'export class \K\w+' $file)
             sed -i "s|<STACK_CLASS>|$class|g" bin/app_template_$(basename $file)
             npx cdk synth -a "node bin/app_template_$(basename $file)"
